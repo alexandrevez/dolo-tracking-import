@@ -38,19 +38,21 @@ func ParseFromCSV(reader *csv.Reader) ([]Descriptor, error) {
 			return descriptorList, fmt.Errorf("Invalid record on line %d", i)
 		}
 
-		email := strings.Trim(record[1], " ")
+		email := strings.TrimSpace(record[1])
 		if !govalidator.IsEmail(email) {
 			logger.Warn(fmt.Sprintf("Email '%s' is not an email on line %d", email, i))
 			continue
 		}
 
 		if emailDoubleChecker[email] {
-			logger.Warn(fmt.Sprintf("Email '%s' was found in double on line: %d", email, i))
 			continue
 		}
 		emailDoubleChecker[email] = true
 
-		descriptorList = append(descriptorList, NewDescriptor(record[0], record[2], email))
+		companyName := strings.TrimSpace(record[0])
+		domainName := strings.TrimSpace(record[2])
+
+		descriptorList = append(descriptorList, NewDescriptor(companyName, domainName, email))
 		added++
 	}
 

@@ -5,11 +5,13 @@ import (
 	"dolo-tracking-import/appconfig"
 	"dolo-tracking-import/contact"
 	"dolo-tracking-import/context"
+	"dolo-tracking-import/hubspot"
 	"dolo-tracking-import/logger"
 	"encoding/csv"
 	"flag"
 	"fmt"
 	"os"
+	"time"
 )
 
 func newConfiguration(csvFile string, hubspotKey string) (*context.Configuration, error) {
@@ -44,6 +46,53 @@ func buildContext(csvFile string, hubspotKey string) (*context.App, error) {
 	return ctx, nil
 }
 
+func processContactList(hubspotKey string, contactList []contact.Descriptor) error {
+	var (
+		err       error
+		hsContact *hubspot.Contact
+		hsCompany *hubspot.Company
+	)
+
+	for _, contact := range contactList {
+
+		// Get or create contact
+		if hsContact, err = hubspot.GetContact(hubspotKey, contact.Email); err != nil {
+			return err
+		}
+		if hsContact == nil {
+			logger.Debug(fmt.Sprintf("Creating new contact '%s'", contact.Email))
+			if hsContact, err = hubspot.AddContact(hubspotKey, contact.Email); err != nil {
+				return err
+			}
+		}
+
+		// Get or create company
+		if hsCompany, err = hubspot.GetCompany(hubspotKey, contact.DomainName, contact.CompanyName); err != nil {
+			return err
+		}
+		if hsCompany == nil {
+			logger.Debug(fmt.Sprintf("Creating company %s (%s)", contact.CompanyName, contact.DomainName))
+			if hsCompany, err = hubspot.AddCompany(hubspotKey, contact.DomainName, contact.CompanyName); err != nil {
+				return err
+			}
+		}
+
+		// Ensure company has type radio and is associated with a company
+		logger.Debug(fmt.Sprintf("Ensuring company %s (%s) has all properties", contact.CompanyName, contact.DomainName))
+		if err = hubspot.UpdateCompany(hubspotKey, hsCompany.CompanyID); err != nil {
+			return err
+		}
+		if err = hubspot.AddCompanyContact(hubspotKey, hsCompany.CompanyID, hsContact.ContactID); err != nil {
+			return err
+		}
+
+		// Hubspot only allows 10 request per second. We are making 6, but you know..
+		time.Sleep(time.Second)
+	}
+
+	return nil
+}
+
 func main() {
 	var (
 		err         error
@@ -55,8 +104,6 @@ func main() {
 	csvFile := flag.String("file", "", "CSV file. Comma separated list of contacts with format:\n\t<company_name>,<email>,<domain>")
 	hubspotKey := flag.String("hubspot", "", "Hubspot API key")
 	flag.Parse()
-
-	fmt.Println(*csvFile, " ", *hubspotKey)
 
 	if *csvFile == "" || *hubspotKey == "" {
 		flag.Usage()
@@ -82,8 +129,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// TODO add records to Hubspot (if not exist)
-	// -1 Add contact if does not exist
-	// -2 Add company (and set filters)
-	fmt.Println("TODO: shits", len(contactList))
+	if err = processContactList(*hubspotKey, contactList); err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
 }
